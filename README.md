@@ -14,3 +14,29 @@
 ```bash
 git clone https://github.com/你的仓库地址/MSSA-Net.git
 cd MSSA-Net
+# Step 1: Create and activate environment (Python 3.8 is mandatory)
+conda create -n mssanet python=3.8 -y
+conda activate mssanet
+
+# Step 2: Install PyTorch (match CUDA version strictly)
+# For CUDA 11.7 (recommended)
+pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
+# For CUDA 11.6 (alternative)
+# pip install torch==1.13.1+cu116 torchvision==0.14.1+cu116 --extra-index-url https://download.pytorch.org/whl/cu116
+
+# Step 3: Install core medical imaging dependencies (fixed versions to avoid conflicts)
+pip install monai==1.1.0 numpy==1.23.5 scipy==1.10.1 scikit-image==0.20.0 tqdm==4.64.1
+pip install opencv-python==4.7.0.72 tensorboard==2.11.2 scikit-learn==1.2.2 matplotlib==3.7.1
+pip install thop==0.1.1.post2209072238 h5py==3.8.0 SimpleITK==2.2.1 medpy==0.4.0 yacs==0.1.8
+
+# Step 4: Install Mamba core dependencies (REQUIRED, no version substitution)
+pip install triton==2.0.0
+pip install causal_conv1d==1.0.0
+pip install mamba_ssm==1.0.1
+
+# If Mamba installation fails (common fixes):
+# Fix 1: Build from source (bypass PyPI restrictions)
+# pip install --no-build-isolation mamba_ssm
+# Fix 2: Update setuptools first
+# pip install --upgrade setuptools wheel
+# pip install mamba_ssm==1.0.1
