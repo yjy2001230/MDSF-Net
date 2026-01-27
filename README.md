@@ -14,7 +14,7 @@
 ```bash
 git clone https://github.com/你的仓库地址/MSSA-Net.git](https://github.com/yjy2001230/MSSA-Net.
 cd MSSA-Net
-1.2 Create conda environment and install dependencies (Exact Versions):
+**1.2 Create conda environment and install dependencies (Exact Versions):**
 # Step 1: Create and activate environment (Python 3.8 is mandatory)
 conda create -n mssanet python=3.8 -y
 conda activate mssanet
