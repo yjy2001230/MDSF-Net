@@ -129,13 +129,13 @@ python train.py -h
 4.1 Train on Synapse
 
 ```bash
-python train.py --dataset Synapse --output_dir './model_output_Synapse' --max_epochs 600 --batch_size 12
+python train.py --dataset Synapse --output_dir './model_output_Synapse' --max_epochs 600 --batch_size 6
 ```
 
 4.2 Train on ACDC
 
 ```bash
-python train.py --dataset Synapse --output_dir './model_output_ACDC' --max_epochs 1000 --batch_size 12
+python train.py --dataset ACDC --output_dir './model_output_ACDC' --max_epochs 1000 --batch_size 6
 ```
 
 If your code requires an explicit dataset root path, add it to the command using the exact flag name in your scripts (for example --root_path or --data_root):
