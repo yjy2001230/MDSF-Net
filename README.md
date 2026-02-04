@@ -50,16 +50,34 @@ Use the directory layout expected by the training scripts.
 A typical layout is:
 
 ```text
-<DATA_ROOT>/
-  Synapse/
-    images/ (or your processed slices)
-    labels/
-    (other files required by your preprocessing)
-  ACDC/
-    images/
-    labels/
-./lists/
-  (train/val/test split files for each dataset)
+.
+├── datasets
+│   └──
+├── lists
+│   └── 
+├── data
+│   ├── Synapse
+│   │   ├── train_npz
+│   │   │   ├── case0005_slice000.npz
+│   │   │   └── *.npz
+│   │   └── test_vol_h5
+│   │       ├── case0001.npy.h5
+│   │       └── *.npy.h5
+│   └── ACDC
+│       ├── train
+│       │   ├── case_001_sliceED_0.npz
+│       │   └── *.npz
+│       ├── test
+│       │   ├── case_002_volume_ED.npz
+│       │   └── *.npz
+│       └── train
+│           ├── case_019_sliceED_0.npz
+│           └── *.npz
+├── networks
+│   └── 
+├── train
+├── test
+└── trainer
 ```
 
 If your scripts use list files:
@@ -139,18 +157,9 @@ python test.py --dataset Synapse --is_saveni True --output_dir './model_output_S
 python test.py --dataset ACDC --is_saveni True --output_dir './model_output_ACDC' --max_epoch 1000 --batch_size 12 --test_save_dir './model_output_ACDC/predictions'
 ```
 
-Outputs:
-- metrics will be printed to stdout (Synapse: mean DSC and mean HD95; ACDC: mean DSC)
-- if --test_save_dir is provided, predicted masks will be saved for visual inspection
 
 
-## 6. Saving predictions (optional)
 
-If you want to save predictions for qualitative comparison:
-- set --test_save_dir to a folder path
-- the script will dump predicted masks (format depends on the repository implementation)
-
-If you need PNG overlays or NIfTI exports, add a small utility script to convert saved predictions, or use an existing script in the repository if available.
 
 
 
