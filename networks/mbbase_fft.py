@@ -210,7 +210,6 @@ class PatchMerging2D(nn.Module):
 
         return x
     
-
     
 
 class Final_PatchExpand2D(nn.Module):
@@ -229,6 +228,54 @@ class Final_PatchExpand2D(nn.Module):
         x= self.norm(x)
 
         return x
+
+
+def dct_1d(x: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
+    # DCT-II on last dimension
+    N = x.shape[-1]
+    x = x.contiguous()
+    v = torch.cat([x, x.flip(dims=[-1])], dim=-1)  # [..., 2N]
+    V = torch.fft.fft(v, dim=-1)                   # complex
+    k = torch.arange(N, device=x.device, dtype=x.dtype)
+    exp = torch.exp(-1j * math.pi * k / (2.0 * N)).to(V.dtype)
+    X = (V[..., :N] * exp).real * 2.0
+    if norm == "ortho":
+        X[..., 0] = X[..., 0] / math.sqrt(4.0 * N)
+        X[..., 1:] = X[..., 1:] / math.sqrt(2.0 * N)
+    return X
+
+def idct_1d(X: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
+    # IDCT-III on last dimension (inverse of dct_1d)
+    N = X.shape[-1]
+    X = X.contiguous()
+    if norm == "ortho":
+        X = X.clone()
+        X[..., 0] = X[..., 0] * math.sqrt(4.0 * N)
+        X[..., 1:] = X[..., 1:] * math.sqrt(2.0 * N)
+
+    k = torch.arange(N, device=X.device, dtype=X.dtype)
+    exp = torch.exp(1j * math.pi * k / (2.0 * N)).to(torch.complex64)
+
+    V = (X / 2.0).to(torch.complex64) * exp
+    v = torch.zeros(*X.shape[:-1], 2 * N, device=X.device, dtype=torch.complex64)
+    v[..., :N] = V
+    if N > 1:
+        v[..., N + 1:] = torch.conj(V[..., 1:N].flip(dims=[-1]))
+    x = torch.fft.ifft(v, dim=-1).real[..., :N]
+    return x
+
+def dct2(x: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
+    # x: [B, C, H, W]
+    x = dct_1d(x, norm=norm)  # along W
+    x = dct_1d(x.transpose(-1, -2), norm=norm).transpose(-1, -2)  # along H
+    return x
+
+def idct2(x: torch.Tensor, norm: str = "ortho") -> torch.Tensor:
+    x = idct_1d(x.transpose(-1, -2), norm=norm).transpose(-1, -2)  # along H
+    x = idct_1d(x, norm=norm)  # along W
+    return x
+
+    
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super(ResBlock, self).__init__()
@@ -249,32 +296,73 @@ class ResBlock(nn.Module):
         out = self.bn2(self.conv2(out))
         out += identity
         return F.relu(out)
+
 class ModReLU(nn.Module):
     def __init__(self, dim):
         super(ModReLU, self).__init__()
-        self.b = nn.Parameter(torch.Tensor(dim))
-        self.b.data.uniform_(-0.1, 0.1)
+        # 仍然叫b,对应论文里的band bias/门控阈值,不改名字
+        self.b = nn.Parameter(torch.empty(dim))
+        self.b.data.fill_(0.02)
 
     def forward(self, x):
-        angle = torch.angle(x)
-        relu_weight = F.relu(torch.cos(angle + self.b.view(1, 1, -1)))
-        return torch.abs(x) * relu_weight
+        # x可以是[B,HW,C]或[B,C,H,W]的实数张量
+        thr = F.softplus(self.b)  # 保证阈值>=0,更稳定
+        if x.dim() == 3:
+            thr = thr.view(1, 1, -1)
+        elif x.dim() == 4:
+            thr = thr.view(1, -1, 1, 1)
+        else:
+            raise ValueError(f"Unsupported shape for ModReLU: {x.shape}")
+
+        # 频带门控:抑制小幅(噪声主导)系数,保留显著系数
+        return torch.sign(x) * F.relu(torch.abs(x) - thr)
 class FFTBlock(nn.Module):
     def __init__(self, dim):
         super(FFTBlock, self).__init__()
+        # W: learnable spectral filter bank(对每个频率点做通道混合)
         self.filter = nn.Linear(dim, dim)
+        # b: band bias(单独的可学习偏置,更贴论文写法)
+        self.band_bias = nn.Parameter(torch.zeros(dim))
+        # ϕ: spectral gating function(沿用类名ModReLU,不改外部命名)
         self.modrelu = ModReLU(dim)
 
     def forward(self, x):
+        # x:[B,C,H,W]
         B, C, H, W = x.shape
-        x = x.permute(0, 2, 3, 1).reshape(B, H * W, C)  # [B, N, C]
-        x = x.to(torch.complex64)
-        x_fft = torch.fft.fft(x, dim=1)
-        x_filtered = self.filter(x_fft.real) + 1j * self.filter(x_fft.imag)
-        x_filtered = self.modrelu(x_filtered)
-        x_out = torch.fft.ifft(x_filtered, dim=1).real
-        x_out = x_out.reshape(B, H, W, C).permute(0, 3, 1, 2)  # [B, C, H, W]
-        return x_out
+        orig_dtype = x.dtype
+
+        # 为了避免AMP/半精度下fft不稳定,内部用float32/complex64
+        x_fp32 = x.float()
+        Fspec = torch.fft.fft2(x_fp32.to(torch.complex64), dim=(-2, -1), norm="ortho")
+
+        # abs/angle
+        A = torch.abs(Fspec).to(torch.float32)     # amplitude:[B,C,H,W]
+        P = torch.angle(Fspec).to(torch.float32)   # phase:[B,C,H,W]
+
+        # DCT on amplitude -> cosine-domain coefficients
+        Cdct = dct2(A, norm="ortho")               # [B,C,H,W]
+
+        # W,b band-wise reweighting: treat each frequency location as token
+        tok = Cdct.permute(0, 2, 3, 1).reshape(B * H * W, C)  # [BHW,C]
+        tok = self.filter(tok)
+        Cdct2 = tok.reshape(B, H, W, C).permute(0, 3, 1, 2).contiguous()  # [B,C,H,W]
+        Cdct2 = Cdct2 + self.band_bias.view(1, C, 1, 1)
+
+        # ϕ gating in cosine domain
+        Cdctg = self.modrelu(Cdct2)
+
+        # IDCT -> enhanced amplitude
+        A_hat = idct2(Cdctg, norm="ortho")         # [B,C,H,W]
+
+        # recombine amplitude with preserved phase: A_hat * exp(jP)
+        # 用cos/sin避免complex exp在某些环境下的兼容问题
+        ejP = torch.cos(P).to(torch.complex64) + 1j * torch.sin(P).to(torch.complex64)
+        F_hat = A_hat.to(torch.complex64) * ejP
+
+        # IFFT -> spatial
+        y = torch.fft.ifft2(F_hat, dim=(-2, -1), norm="ortho").real
+        return y.to(orig_dtype)
+######################################################################################
 
 
 class SS2D(nn.Module):
@@ -672,7 +760,6 @@ class VSSLayer_up(nn.Module):
                 x = blk(x)
         return x
     
-########################  medmamba风格版本#################################
 class VSSM(nn.Module):
     def __init__(self, 
                  patch_size=1, 
@@ -733,30 +820,6 @@ class VSSM(nn.Module):
 
 import torch
 
-# 你的 VSSM 模块定义应放在此之前
-# 假设你已经复制了上面的所有模块定义，包括 PatchEmbed2D、VSSLayer、PatchMerging2D、SS_Conv_SSM 等
-
-# 实例化 VSSM（Med-Mamba 风格编码器）
-# model = VSSM(
-#     patch_size=4,
-#     in_chans=3,
-#     depths=[2, 2, 4, 2, 2],
-#     dims=[96, 192, 384, 768, 1536],
-#     d_state=16,
-#     drop_rate=0.0,
-#     attn_drop_rate=0.0,
-#     drop_path_rate=0.1,
-# )
-
-# # 创建测试输入 (batch=1, channel=3, H=224, W=224)
-# x = torch.randn(1, 3, 224, 224)
-
-# # 执行前向传播，输出 5 个多尺度特征
-# features = model(x)
-
-# # 打印输出信息
-# for i, feat in enumerate(features):
-#     print(f"Stage {i + 1} output shape: {feat.shape}")
 
 
 medmamba_t = VSSM(depths=[2, 2, 4,2,2], dims=[96, 192, 384,768,1536]).to("cuda")
