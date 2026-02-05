@@ -1,6 +1,6 @@
 # MDSF-Net
 
-PyTorch implementation of MSSA-Net for medical image segmentation.
+PyTorch implementation of MDSF-Net for medical image segmentation.
 
 This repository contains training and evaluation code for two public benchmarks:
 Synapse (multi-organ CT) and ACDC (cardiac MRI). The scripts follow a slice-wise
@@ -140,6 +140,15 @@ python test.py --dataset Synapse --is_saveni True --output_dir './model_output_S
 python test.py --dataset ACDC --is_saveni True --output_dir './model_output_ACDC' --max_epoch 1000 --batch_size 12 --test_save_dir './model_output_ACDC/predictions'
 ```
 
+## 6. Outputs
+
+- Checkpoints and logs are written to `--output_dir`.
+- If `--is_saveni True` is enabled, predicted masks/volumes are saved to `--test_save_dir`.
+
+## 7. Troubleshooting
+
+- `ModuleNotFoundError`: re-check environment and `pip install -r requirements.txt`.
+- CUDA build issues (especially for optional Mamba packages): ensure your PyTorch CUDA version matches your system CUDA toolkit.
 
 
 
