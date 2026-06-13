@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from timm.models.layers import DropPath
 from einops import rearrange, repeat
 from functools import partial
-from mbbase_fft import VSSM
+
 
 
 def default_conv(in_channels, out_channels, kernel_size, stride=1, bias=True):
